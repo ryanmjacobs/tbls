@@ -19,15 +19,17 @@ var reVersion = regexp.MustCompile(`([0-9]+(\.[0-9]+)*)`)
 
 // Postgres struct
 type Postgres struct {
-	db     *sql.DB
-	rsMode bool
+	db         *sql.DB
+	rsMode     bool
+	unwrapText bool
 }
 
 // New return new Postgres
 func New(db *sql.DB) *Postgres {
 	return &Postgres{
-		db:     db,
-		rsMode: false,
+		db:         db,
+		rsMode:     false,
+		unwrapText: false,
 	}
 }
 
@@ -121,7 +123,7 @@ ORDER BY oid`)
 		table := &schema.Table{
 			Name:    name,
 			Type:    tableType,
-			Comment: tableComment.String,
+			Comment: p.preformat(tableComment.String),
 		}
 
 		// (materialized) view definition
@@ -173,7 +175,7 @@ ORDER BY oid`)
 				Columns:           arrayRemoveNull(constraintColumnNames),
 				ReferencedTable:   &rt,
 				ReferencedColumns: arrayRemoveNull(constraintReferencedColumnNames),
-				Comment:           constraintComment.String,
+				Comment:           p.preformat(constraintComment.String),
 			}
 
 			if constraintType == "f" {
@@ -216,7 +218,7 @@ ORDER BY tgrelid
 				trigger := &schema.Trigger{
 					Name:    triggerName,
 					Def:     triggerDef,
-					Comment: triggerComment.String,
+					Comment: p.preformat(triggerComment.String),
 				}
 				triggers = append(triggers, trigger)
 			}
@@ -252,7 +254,7 @@ ORDER BY tgrelid
 				Name:     columnName,
 				Type:     dataType,
 				Nullable: isNullable,
-				Comment:  columnComment.String,
+				Comment:  p.preformat(columnComment.String),
 			}
 			switch attrgenerated.String {
 			case "":
@@ -290,7 +292,7 @@ ORDER BY tgrelid
 				Def:     indexDef,
 				Table:   &table.Name,
 				Columns: arrayRemoveNull(indexColumnNames),
-				Comment: indexComment.String,
+				Comment: p.preformat(indexComment.String),
 			}
 
 			indexes = append(indexes, index)
@@ -505,6 +507,11 @@ func (p *Postgres) EnableRsMode() {
 	p.rsMode = true
 }
 
+// EnableUnwrapText enable unwrapText
+func (p *Postgres) EnableUnwrapText() {
+	p.unwrapText = true
+}
+
 func (p *Postgres) queryForColumns(v string) (string, error) {
 	verGeneratedColumn, err := version.Parse("12")
 	if err != nil {
@@ -694,4 +701,31 @@ func parseFK(def string) ([]string, string, []string, error) {
 		strParentColumns = append(strParentColumns, strings.ReplaceAll(c, `"`, ""))
 	}
 	return strColumns, strParentTable, strParentColumns, nil
+}
+
+// Run optional preformat routines
+// Used for COMMENT responses
+func (p *Postgres) preformat(text string) string {
+	p.EnableUnwrapText()
+
+	if p.unwrapText {
+		text = unwrapText(text)
+	}
+	return text
+}
+
+func unwrapText(text string) string {
+	lines := strings.SplitN(text, "\n", -1)
+	final := ""
+
+	for _, line := range lines {
+		final += line
+		if len(line) == 0 {
+			final += "\n\n"
+		} else {
+			final += " "
+		}
+	}
+
+	return final
 }
